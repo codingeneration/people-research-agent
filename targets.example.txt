@@ -1,0 +1,3 @@
+Jane Doe	Acme Corporation
+John Smith	Example Industries
+Alex Rivera	Sample & Co
