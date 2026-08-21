@@ -10,12 +10,15 @@ A Python agent that chains Google Custom Search with Gemini to generate structur
 
 Only one Gemini API call is made per person (the synthesis step) — search queries are generated directly rather than through an extra planning call, keeping token usage and cost down for batch runs.
 
+Only the person's *name* is wrapped as an exact-match phrase in each search query; the company is included as a normal keyword alongside it rather than glued into the same quoted phrase. Wrapping the entire "Name Company" string as one literal exact phrase is too restrictive and reliably returns zero results, since that precise combined string rarely appears verbatim on any real page.
+
 ## Features
 
-- **Batch processing** — reads a plain text list of names and runs the full pipeline for each.
+- **Batch processing** — reads a plain text list of name/company pairs and runs the full pipeline for each.
 - **Resumable** — skips anyone who already has a saved report, so a batch can be safely re-run after an interruption.
 - **Rate-limit aware** — aggressive retry/backoff (1/2/3 minute waits) on Gemini 429 responses, plus a pause between people to stay within Search API quotas.
 - **Environment-based config** — no keys in code; everything loads from a local `.env` file.
+- **Visible error reporting** — search failures print their status code/error instead of failing silently, so a misconfigured Search Engine or exhausted quota is obvious immediately rather than producing empty reports.
 
 ## Setup
 
@@ -37,6 +40,8 @@ SEARCH_ENGINE_ID=your_search_engine_id_here
 - **Gemini API key** — from [Google AI Studio](https://aistudio.google.com/).
 - **Custom Search API key + Search Engine ID** — from the [Programmable Search Engine](https://programmablesearchengine.google.com/) control panel and [Google Cloud Console](https://console.cloud.google.com/).
 
+**Important:** in your Programmable Search Engine's control panel, under **Setup → Basics**, make sure **"Search the entire web"** is enabled and no specific sites are listed under "Sites to search." By default, a newly created search engine can be scoped to a limited site list, which will silently return zero results for general queries.
+
 ## Usage
 
 Run diagnostics first to confirm both APIs are reachable and to find a working Gemini model name for your key:
@@ -45,13 +50,21 @@ Run diagnostics first to confirm both APIs are reachable and to find a working G
 python diagnostics.py
 ```
 
-Create your own target list (one `Name<TAB>Company` pair per line — see `targets.example.txt` for the format), then run:
+Create your own target list — one `Name<TAB>Company` pair per line, tab-separated (see `targets.example.txt` for the format) — then run:
 
 ```bash
 python people_research_agent.py targets.txt
 ```
 
 Reports land in `reports/<Name>.md`.
+
+**A note on the target file format:** the parser expects a real tab character between name and company, not spaces. Most text editors insert a literal tab when you press the Tab key, but if you're unsure, you can build the file directly in a terminal:
+
+```bash
+printf 'Jane Doe\tAcme Corporation\nJohn Smith\tExample Industries\n' > targets.txt
+```
+
+If no tab is present, the parser falls back to splitting on the last run of two or more spaces — but a tab is the reliable option.
 
 ## Project structure
 
@@ -60,8 +73,14 @@ Reports land in `reports/<Name>.md`.
 | `people_research_agent.py` | Main batch runner — search, synthesize, save |
 | `diagnostics.py` | Connectivity checks + Gemini model discovery |
 | `.env.example` | Template for required environment variables |
-| `targets.example.txt` | Example input format (placeholder names) |
+| `targets.example.txt` | Example input format (placeholder names, tab-separated) |
 | `requirements.txt` | Python dependencies |
+
+## Troubleshooting
+
+- **Reports come back saying "no information available"** — almost always means the Search API returned zero results. Run `python diagnostics.py` to confirm the Search API is reachable, then check that your Programmable Search Engine has "Search the entire web" enabled (see Setup above). Also confirm your `targets.txt` uses tab separators, not run-together text, so names and companies aren't accidentally combined into one over-restrictive exact-phrase query.
+- **429 errors from Gemini** — you've hit a rate limit; the script already retries with backoff, but persistent 429s usually mean you're on a free tier and should slow down the batch (increase the `time.sleep()` pause between people).
+- **Search API quota exhausted** — the free tier caps at 100 queries/day (3 queries per person × batch size). Plan batch sizes accordingly or request a quota increase in Google Cloud Console.
 
 ## A note on privacy
 
